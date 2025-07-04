@@ -1,0 +1,1 @@
+### Certifique-se de criar o arquivo "log.txt" na raiz do projeto. ###
