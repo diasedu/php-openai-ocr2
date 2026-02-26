@@ -1,2 +1,6 @@
 
 log.txt
+.env
+.vscode
+files/*
+_files/*

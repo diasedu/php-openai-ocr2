@@ -10,7 +10,7 @@
 </head>
 <body class="bg-body-secondary">
     <div class="container">
-        <h1 style="text-align: center;" class="mb-5">Extrair texto de uma imagem</h1>
+        <h1 style="text-align: center;" class="mb-5">Informações do Documento</h1>
         <div class="d-flex justify-content-center align-items-center mb-3">
             <form action="extrairTexto.php" method="post">
                 <div class="mb-3">
@@ -18,7 +18,7 @@
                 </div>
 
                 <div>
-                    <button class="btn btn-primary">Enviar</button>
+                    <button class="btn btn-primary btn-lg">Enviar</button>
                 </div>
             </form>
         </div>
@@ -28,9 +28,16 @@
         <pre id="result"></pre>
     </div>
     <script>
-        $("form").on("submit", function(evento)
-        {
+        const $divCarregamento = $("#loadDiv");
+        const $divResultado    = $("#result");
+
+        $("form").on("submit", function(evento) {
             evento.preventDefault();
+
+            if ($("input[type=file]").val() === "") {
+                return alert("Por favor, selecione um arquivo antes de enviar.");
+                
+            }
 
             const data = new FormData(this);
 
@@ -42,19 +49,38 @@
                 cache: false,
                 contentType: false,
                 processData: false,
-                beforeSend: function()
-                {
+                beforeSend: function() {
                     $(this).prop("disabled", true);
-                    $("#loadDiv").css("display", "block");
+                    $divCarregamento.css("display", "block");
+                    $divResultado.removeClass("alert alert-danger alert-primary").html("");
+
                 },
-                success: function(response)
-                {
-                    $('#result').html(response['data']);
+                success: function(resposta) {
+                    if (resposta.error) {
+                        return $divResultado.addClass('alert alert-danger').html(resposta.msg);
+                    }
+
+                    const rg = resposta.data.rg;
+                    const cpf = resposta.data.cin;
+                    const semelhanca = resposta.data.porcentagem;
+                    const descricao = resposta.data.motivo;
+                    const documentoAberto = resposta.data.documento_aberto;
+                    const validade = resposta.data.validade;
+
+
+                   $divResultado.addClass('alert alert-primary').html(`
+                        <strong>RG:</strong> ${rg} <br>
+                        <strong>CIN:</strong> ${cpf} <br>
+                        <strong>Semelhança:</strong> ${semelhanca}% <br>
+                        <strong>Motivo:</strong> ${descricao} <br>
+                        <strong>Documento Aberto:</strong> ${documentoAberto} <br>
+                        <strong>Validade:</strong> ${validade} <br>
+                    `);
                 },
                 complete: function()
                 {
                     $(this).prop("disabled", false);
-                    $("#loadDiv").css("display", "none");
+                    $divCarregamento.css("display", "none");
                 },
             });
         });

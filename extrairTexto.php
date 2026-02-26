@@ -42,16 +42,24 @@ function definirDados($arquivo)
                             - Posição e organização dos dados
                             - Aparência geral (se parece com um RG legítimo ou outro tipo de documento)
                             - O documento deve estar aberto igual ao modelo
-
+                            - Caso haja dúvidas, verifique a terceira imagem e diga qual modelo ela se assemelha mais, mesmo que a semelhança seja baixa.
+                            
+                            Campos
+                            - RG: Se o documento da terceira imagem for semelhante ao modelo de RG, retorne `true`. Caso contrário, retorne `false`.
+                            - CIN: Se o documento da terceira imagem for semelhante ao modelo de CIN, retorne `true`. Caso contrário, retorne `false`.
+                            - Porcentagem de semelhança: Retorne a porcentagem de semelhança entre a terceira imagem e o modelo mais próximo (RG ou CIN).
+                            - Motivo: Forneça uma explicação curta e objetiva da decisão, destacando os principais pontos de comparação.
+                            - Documento aberto: Indique se o documento da terceira imagem está aberto de forma semelhante ao modelo (ou seja, se os campos estão visíveis e organizados de maneira similar).
+                            - Válido: Indique se o documento da terceira imagem é considerado válido com base na semelhança e na estrutura. Documentos são considerados válidos se estiverem no período de 10 anos a partir da data de emissão, ou seja, se a data de emissão for inferior a 10 anos a partir da data atual.
                             Responda **somente** com um JSON, no seguinte formato:
 
                             {
-                            "rg": true ou false,
-                            "cin": true ou false,
-                            "porcentagem": "Porcentagem de semelhança entre os documentos (ex: 85.3)",
-                            "motivo": "Explicação curta e objetiva da decisão",
-                            "tipo_documento": "Tipo de documento identificado na segunda imagem",
-                            "documento_aberto": true ou false
+                                "rg": true ou false,
+                                "cin": true ou false,
+                                "porcentagem": "Porcentagem de semelhança entre os documentos (ex: 85.3)",
+                                "motivo": "Explicação curta e objetiva da decisão",
+                                "documento_aberto": true ou false,
+                                "validade": Válido até XX/XX/XXXX ou Vencido em XX/XX/XXXX
                             }
 
                             **Importante**: não inclua explicações fora do JSON e não use formatação adicional como Markdown.
@@ -79,94 +87,92 @@ function definirDados($arquivo)
 
 }
 
-function consultarApi(array $data)
+function requisitarCUrl(string $url, array $cabeçalhos, array $dados) 
 {
-    try {
-        $headers = array(
-            "Content-Type: application/json", 
-            sprintf("Authorization: Bearer %s", API_KEY)
-        );
-
-        # Inicia o cURL.
-        $ch = curl_init(API_ENDPOINT);
-
-        # Configura cURL.
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($ch, CURLOPT_POST, true);
-        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($data));
-        curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-
-        $response = curl_exec($ch);
-
-        error_log($response);
-
-        # Exibe a resposta de acordo com o status (com erro ou sem).
-        if (curl_errno($ch))
-        {
-            echo sprintf("Erro: %s", curl_error($ch));
-            
-            $retorno = [
-                "error" => true,
-                "data" => "",
-                "msg" => ""
-            ];
-
-            return $retorno;
-        }
-
-        $data = json_decode($response, true);
-        $dataArray = json_decode($data["choices"][0]["message"]["content"], true);
-
-        $retorno = [
-            "error" => false,
-            "data" => $data["choices"][0]["message"]["content"],
-            "msg" => null
-        ];
-
-    } catch (Throwable $e)
-    {
-        $retorno = [
-            "error" => true,
-            "data" => $e->getMessage(),
-            "msg" => $e->getMessage()
-        ];
-    } finally
-    {
-        curl_close($ch);
-
-        return $retorno;
+    if (empty($cabeçalhos) || empty($dados) || empty($url)) {
+        throw new InvalidArgumentException("Os cabeçalhos, os dados e a URL não podem ser vazios.");
     }
+
+    $ch = curl_init($url);
+
+    # Configura cURL.
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($dados));
+    curl_setopt($ch, CURLOPT_HTTPHEADER, $cabeçalhos);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+
+    $resposta = curl_exec($ch);
+
+    error_log($resposta);
+
+    $houveErro = curl_errno($ch);
+
+    if ($houveErro) {
+        $erro = curl_error($ch);
+        throw new RuntimeException("Erro na requisição cURL: $erro");
+    }
+
+    return  json_decode($resposta, true);
+
 }
 
-# Habilita logs.
-ini_set("log_errors", true);
-ini_set("error_log", ARQUIVO_LOG);
+function realizarUploadArquivo()
+{
+    $nomeDoArquivo    = $_FILES["file"]["name"];
+    $diretorioDestino = DIR_ARQUIVO;
+    $destino          = "$diretorioDestino$nomeDoArquivo";
 
-# Move o arquivo para o diretório especificado
-$destino = sprintf("%s%s", DIR_ARQUIVO, basename($_FILES["file"]["name"]));
+    $arquivoTemporario = $_FILES["file"]["tmp_name"];
+
+    if (!move_uploaded_file($arquivoTemporario, $destino)) {
+        throw new RuntimeException("Falha ao mover o arquivo para o diretório de destino.");
+    }
+
+    $mimesPermitidos = ['image/jpeg', 'image/png', 'image/jpg'];
+    
+    if (!in_array(mime_content_type($destino), $mimesPermitidos)) {
+        unlink($destino);
+        throw new InvalidArgumentException("Tipo de arquivo não permitido. Apenas JPEG e PNG são aceitos.");
+    }
+    
+    return $destino;
+}
+
+function extrairInformacoesViaOpenAI()
+{
+    $destino = realizarUploadArquivo();
+    $chaveAPI = API_KEY;
+
+    $cabecalhos = ['Content-Type: application/json', "Authorization: Bearer $chaveAPI"];
+
+
+    $dados     = definirDados($destino);
+    $resposta = requisitarCUrl(API_ENDPOINT, $cabecalhos, $dados);
+
+    return $resposta;
+}
+
 
 try {
-    if (move_uploaded_file($_FILES["file"]["tmp_name"], $destino))
-    {
-        // Resgata o arquivo movido para enviar para a API
-        $data = definirDados($destino);
-        $response = consultarApi($data);
+    $openAI = extrairInformacoesViaOpenAI();
 
-        echo json_encode($response);
-    } else
-    {
-        echo json_encode([
-            "error" => true,
-            "msg" => "Falha ao mover o arquivo.",
-            'data' => 'Falha ao mover o arquivo'
-        ]);
-    }
-} catch (Throwable $e)
-{
+    echo json_encode([
+        "error" => false,
+        "msg"   => "Arquivo processado com sucesso.",
+        'data'  => json_decode($openAI['choices'][0]['message']['content'], true)
+    ]);
+    
+} catch (InvalidArgumentException $iae) {
     echo json_encode([
         "error" => true,
-        "msg" => $e->getMessage(),
+        "msg"   => $iae->getMessage(),
+        'data'  => $iae->getMessage()
+    ]);
+} catch (Exception $e) {
+    echo json_encode([
+        "error" => true,
+        "msg"   => "Ocorreu um erro ao processar o arquivo.",
         'data' => $e->getMessage()
     ]);
 }
